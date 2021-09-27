@@ -61,7 +61,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     bool Surge_Token_Activated;
 
     // launch time
-    uint256 _launchTime;
+    bool _allowStaking;
     
     // disables the use of the Useless Bypass
     bool _useUselessBypass;
@@ -240,7 +240,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     /** Stake Tokens and Deposits Surge in Sender's Address, Must Have Prior Approval */
     function stakeUnderlyingAsset(uint256 numTokens) external nonReentrant override returns (bool) {
         // make sure emergency mode is disabled
-        require((!emergencyModeEnabled && Surge_Token_Activated && _launchTime + 28800 < block.number) || _owner == msg.sender, 'EMERGENCY MODE ENABLED');
+        require((!emergencyModeEnabled && Surge_Token_Activated && _allowStaking) || _owner == msg.sender, 'STAKING NOT ENABLED');
         // users token balance
         uint256 userTokenBalance = IERC20(_token).balanceOf(msg.sender);
         // ensure user has enough to send
@@ -435,7 +435,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     function ActivateSurgeToken() external onlyOwner {
         require(!Surge_Token_Activated, 'Already Activated Token');
         Surge_Token_Activated = true;
-        _launchTime = block.number;
         allowFunding = true;
         emit SurgeTokenActivated();
     }
@@ -459,6 +458,12 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         allowFunding = false;
         // Let Everyone Know
         emit EmergencyModeEnabled();
+    }
+    
+    /** Allows Users To Stake Underlying Asset Into Surge */
+    function setAllowSurgeStaking(bool allow) external onlyOwner {
+        _allowStaking = allow;
+        emit UpdatedAllowSurgeStaking(allow);
     }
     
     /** Updates The Buy/Sell/Stake and Transfer Fee Allocated Toward Funding */
@@ -528,6 +533,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     event UpgradeSurgeDatabase(address newDatabase);
     event UpdatedAllowFunding(bool _allowFunding);
     event SetApprovedLP(address LP, bool isLP);
+    event UpdatedAllowSurgeStaking(bool allow);
     event TransferOwnership(address newOwner);
     event TokenStaked(uint256 numTokens);
     event EmergencyModeEnabled();
