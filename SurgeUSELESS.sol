@@ -60,9 +60,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     
     // Activates Surge Token Trading
     bool Surge_Token_Activated;
-    
-    // xToken Database
-    SurgeDatabase db;
 
     // launch time
     uint256 _launchTime;
@@ -70,6 +67,15 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     // disables the use of the Useless Bypass
     bool _useUselessBypass;
     
+    // surge fund data 
+    bool allowFunding;
+    address _surgeFund;
+    uint256 _fundingBuyFeeDenominator;
+    uint256 _fundingTransferFeeDenominator;
+    
+    // LP Management
+    mapping (address => bool) approvedLP;
+
     modifier onlyOwner() {
         require(msg.sender == _owner, 'Only Owner Function');
         _;
@@ -92,13 +98,16 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         sellFee = _sellFee;
         transferFee = _transferFee;
         stakeFee = 94125;
-        // Surge Database
-        db = SurgeDatabase(0x6879f20FcCf951FC88809F8EBAc48826De7C779e);
+        // Swaps + Funding
+        _surgeFund = 0x95c8eE08b40107f5bd70c28c4Fd96341c8eaD9c7;
+        _fundingBuyFeeDenominator = 200;
+        _fundingTransferFeeDenominator = 4;
         _uselessSwapper = IUselessBypass(payable(0xca103724A986e76B64B2bbbb896a0bc3b689661C));
         _useUselessBypass = true;
+        // Approved LPs
+        approvedLP[0x10ED43C718714eb63d5aA57B78B54704E256024E] = true;
         // ownership
         _owner = msg.sender;
-        _launchTime = block.number;
         // allot starting 1 billion to contract to be Garbage Collected
         _balances[address(this)] = _totalSupply;
         emit Transfer(address(0), address(this), _totalSupply);
@@ -149,10 +158,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         require(amount > 0, "Transfer amount must be greater than zero");
         // track price change
         uint256 oldPrice = calculatePrice();
-        // get funding recipient
-        address surgeFund = db.getFundingReceiver();
-        // do we allow funding
-        bool allowFunding = db.allowFundingForToken(address(this));
         // subtract form sender, give to receiver, burn the fee
         uint256 tAmount = amount.mul(transferFee).div(10**2);
         uint256 tax = amount.sub(tAmount);
@@ -161,17 +166,15 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         // give reduced amount to receiver
         _balances[recipient] = _balances[recipient].add(tAmount);
         
-        if (allowFunding && sender != surgeFund && recipient != surgeFund) {
-            // funding fee
-            uint256 transferDenom = db.getFundingTransferFeeForToken(address(this));
+        if (allowFunding && sender != _surgeFund && recipient != _surgeFund) {
             // allocate percentage of the tax for Surge Fund
-            uint256 allocation = tax.div(transferDenom);
+            uint256 allocation = tax.div(_fundingTransferFeeDenominator);
             // how much are we removing from total supply
             tax = tax.sub(allocation);
             // allocate funding to Surge Fund
-            _balances[surgeFund] = _balances[surgeFund].add(allocation);
+            _balances[_surgeFund] = _balances[_surgeFund].add(allocation);
             // Emit Donation To Surge Fund
-            emit Transfer(sender, surgeFund, allocation);
+            emit Transfer(sender, _surgeFund, allocation);
         }
         // burn the tax
         _totalSupply = _totalSupply.sub(tax);
@@ -192,10 +195,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         require((!emergencyModeEnabled && Surge_Token_Activated) || _owner == msg.sender, 'EMERGENCY MODE ENABLED');
         // calculate price change
         uint256 oldPrice = calculatePrice();
-        // get funding recipient
-        address surgeFund = db.getFundingReceiver();
-        // do we allow funding
-        bool allowFunding = db.allowFundingForToken(address(this));
         // previous amount of Tokens before we received any
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // buy useless with bnb
@@ -216,17 +215,15 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         // revert if under 1
         require(tokensToSend > 0, 'Must Purchase At Least One Surge');
 
-        if (allowFunding && msg.sender != surgeFund) {
-            // funding fee
-            uint256 denom = db.getFundingBuyFeeForToken(address(this));
+        if (allowFunding && msg.sender != _surgeFund) {
             // allocate tokens to go to the Surge Fund
-            uint256 allocation = tokensToSend.div(denom);
+            uint256 allocation = tokensToSend.div(_fundingBuyFeeDenominator);
             // the rest go to purchaser
             tokensToSend = tokensToSend.sub(allocation);
             // mint to Fund
-            mint(surgeFund, allocation);
+            mint(_surgeFund, allocation);
             // Tell Blockchain
-            emit Transfer(address(this), surgeFund, allocation);
+            emit Transfer(address(this), _surgeFund, allocation);
         }
         
         // mint to Buyer
@@ -252,10 +249,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         require(userTokenBalance > 0 && numTokens <= userTokenBalance, 'Insufficient Balance');
         // calculate price change
         uint256 oldPrice = calculatePrice();
-        // do we allow funding
-        bool allowFunding = db.allowFundingForToken(address(this));
-        // get funding recipient
-        address surgeFund = db.getFundingReceiver();
         // previous amount of Tokens before any are received
         uint256 prevTokenAmount = IERC20(_token).balanceOf(address(this));
         // move asset into Surge Token
@@ -279,17 +272,17 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         // revert if under 1
         require(tokensToSend > 0, 'Must Purchase At Least One Surge');
 
-        if (allowFunding && msg.sender != surgeFund) {
-            // funding fee
-            uint256 denom = db.getFundingBuyFeeForToken(address(this)).mul(4);
+        if (allowFunding && msg.sender != _surgeFund) {
+            // less fee for staking 
+            uint256 denom = _fundingBuyFeeDenominator.mul(4);
             // allocate tokens to go to the Surge Fund
             uint256 allocation = tokensToSend.div(denom);
             // the rest go to purchaser
             tokensToSend = tokensToSend.sub(allocation);
             // mint to Fund
-            mint(surgeFund, allocation);
+            mint(_surgeFund, allocation);
             // Tell Blockchain
-            emit Transfer(address(this), surgeFund, allocation);
+            emit Transfer(address(this), _surgeFund, allocation);
         }
         
         // mint to Buyer
@@ -311,28 +304,22 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     function sell(uint256 tokenAmount) external nonReentrant override {
         // calculate price change
         uint256 oldPrice = calculatePrice();
-        // get funding recipient
-        address surgeFund = db.getFundingReceiver();
-        // do we allow funding
-        bool allowFunding = db.allowFundingForToken(address(this));
         // calculate the sell fee from this transaction
         uint256 tokensToSwap = tokenAmount.mul(sellFee).div(10**2);
         // subtract full amount from sender
         _balances[msg.sender] = _balances[msg.sender].sub(tokenAmount, 'Insufficient Balance');
 
-        if (allowFunding && msg.sender != surgeFund) {
-            // transfer fee
-            uint256 denom = db.getFundingBuyFeeForToken(address(this));
+        if (allowFunding && msg.sender != _surgeFund) {
             // allocate percentage to Surge Fund
-            uint256 allocation = tokensToSwap.div(denom);
+            uint256 allocation = tokensToSwap.div(_fundingBuyFeeDenominator);
             // subtract allocation from tokensToSwap
             tokensToSwap = tokensToSwap.sub(allocation);
             // burn tokenAmount - allocation
             tokenAmount = tokenAmount.sub(allocation);
             // Allocate Tokens To Surge Fund
-            _balances[surgeFund] = _balances[surgeFund].add(allocation);
+            _balances[_surgeFund] = _balances[_surgeFund].add(allocation);
             // Tell Blockchain
-            emit Transfer(msg.sender, surgeFund, allocation);
+            emit Transfer(msg.sender, _surgeFund, allocation);
         }
         
         // how many Tokens are these tokens worth?
@@ -416,7 +403,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     
     /** Returns true if manager is a registered xTokenManager */
     function isApprovedLP(address manager) public view returns (bool) {
-        return db.getIsApprovedLP(manager);
+        return approvedLP[manager];
     }
     
     /** List all fees */
@@ -436,25 +423,13 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     }
 
     /** Returns the value of your holdings after the sell fee */
-    function getValueOfHoldingsAfterTax(address holder) public view returns(uint256) {
-        uint256 holdings = _balances[holder].mul(calculatePrice());
-        return holdings.mul(sellFee).div(10**2);
+    function getValueOfHoldingsAfterTax(address holder) external view returns(uint256) {
+        return getValueOfHoldings(holder).mul(sellFee).div(10**2);
     }
 
     /** Returns The Address of the Underlying Asset */
     function getUnderlyingAsset() external override view returns(address) {
         return _token;
-    }
-
-    /** Returns Value of Holdings in USD */
-    function getValueOfHoldingsInUSD(address holder) public view returns(uint256) {
-        if (_balances[holder] == 0) return 0;
-        return db.getValueOfHoldingsInUSD(_token, _balances[holder].mul(calculatePrice()));
-    }
-    
-    /** Returns Value of Underlying Asset in USD */
-    function getValueOfUnderlyingAssetInUSD() public view returns(uint256) {
-        return db.getValueOfUnderlyingAssetInUSD(_token);
     }
     
     
@@ -467,7 +442,8 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     function ActivateSurgeToken() external onlyOwner {
         require(!Surge_Token_Activated, 'Already Activated Token');
         Surge_Token_Activated = true;
-        db.setAllowFundingForToken(address(this), true);
+        _launchTime = block.number;
+        allowFunding = true;
         emit SurgeTokenActivated();
     }
     
@@ -477,8 +453,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     * This will disable the ability to purchase Surge Tokens
     * This Action Cannot Be Undone
     */
-    function enableEmergencyMode() external override {
-        require(msg.sender == _owner || msg.sender == address(db), 'Invalid Entry');
+    function enableEmergencyMode() external override onlyOwner {
         require(!emergencyModeEnabled, 'Emergency Mode Already Enabled');
         // disable fees
         sellFee = 100;
@@ -488,9 +463,23 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         // disable purchases
         emergencyModeEnabled = true;
         // disable funding
-        db.setAllowFundingForToken(address(this), false);
+        allowFunding = false;
         // Let Everyone Know
         emit EmergencyModeEnabled();
+    }
+    
+    /** Updates The Buy/Sell/Stake and Transfer Fee Allocated Toward Funding */
+    function updateFundingValues(uint256 transferDenom, uint256 buySellDenom) external onlyOwner {
+        require(transferDenom >= 2 && buySellDenom >= 50, 'Fees Too High');
+        _fundingTransferFeeDenominator = transferDenom;
+        _fundingBuyFeeDenominator = buySellDenom;
+        emit UpdatedFundingValues(transferDenom, buySellDenom);
+    }
+    
+    /** Whether or not Funding is removed for SurgeFund */
+    function updateAllowFunding(bool _allowFunding) external onlyOwner {
+        allowFunding = _allowFunding;
+        emit UpdatedAllowFunding(_allowFunding);
     }
     
     /** Whether or Not Contract Uses the Useless Bypass to Transfer Tokens */
@@ -504,12 +493,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         require(garbageThreshold > 0 && garbageThreshold <= 10**12, 'invalid threshold');
         garbageCollectorThreshold = garbageThreshold;
         emit UpdatedGarbageCollectorThreshold(garbageThreshold);
-    }
-    
-    /** Upgrades The Surge Database*/
-    function upgradeSurgeDatabase(address newDatabase) external onlyOwner {
-        db = SurgeDatabase(newDatabase);
-        emit UpgradeSurgeDatabase(newDatabase);
     }
     
     /** Transfers Ownership To Another User */
@@ -536,8 +519,10 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     ///////////////////////////////////
     
     event PriceChange(uint256 previousPrice, uint256 currentPrice, uint256 totalSupply);
+    event UpdatedFundingValues(uint256 transferDenom, uint256 buySellDenom);
     event ErasedHoldings(address who, uint256 amountTokensErased);
     event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
+    event UpdatedAllowFunding(bool _allowFunding);
     event GarbageCollected(uint256 amountTokensErased);
     event UpdatedUseUselessBypass(bool canUseBypass);
     event UpgradeSurgeDatabase(address newDatabase);
