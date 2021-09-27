@@ -30,7 +30,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     uint8 public constant _decimals = 0;
     
     // 1 Billion Total Supply
-    uint256 _totalSupply = 1 * 10**9;
+    uint256 public _totalSupply = 1 * 10**9;
     
     // balances
     mapping (address => uint256) _balances;
