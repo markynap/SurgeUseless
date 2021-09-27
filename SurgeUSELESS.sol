@@ -7,7 +7,6 @@ import "./ReentrantGuard.sol";
 import "./IERC20.sol";
 import "./IStakableSurge.sol";
 import "./IUselessBypass.sol";
-import "./SDatabase.sol";
 
 /**
  * Contract: Surge Token
@@ -28,7 +27,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     // token data
     string public _name = "SurgeToken";
     string public _symbol = "S_Ticker";
-    uint8 public _decimals = 0;
+    uint8 public constant _decimals = 0;
     
     // 1 Billion Total Supply
     uint256 _totalSupply = 1 * 10**9;
@@ -82,7 +81,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     }
 
     // initialize some stuff
-    constructor ( address peggedToken, string memory tokenName, string memory tokenSymbol, uint8 tokenDecimals, uint256 _buyFee, uint256 _sellFee, uint256 _transferFee
+    constructor ( address peggedToken, string memory tokenName, string memory tokenSymbol, uint256 _buyFee, uint256 _sellFee, uint256 _transferFee
     ) {
         // ensure arguments meet criteria
         require(_buyFee <= 100 && _sellFee <= 100 && _transferFee <= 100 && _buyFee >= 50 && _sellFee >= 50 && _transferFee >= 50, 'Invalid Fees, Must Range From 50 - 100');
@@ -92,7 +91,6 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         // token stats
         _name = tokenName;
         _symbol = tokenSymbol;
-        _decimals = tokenDecimals;
         // fees
         buyFee = _buyFee;
         sellFee = _sellFee;
@@ -125,7 +123,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         return _symbol;
     }
 
-    function decimals() public view override returns (uint8) {
+    function decimals() public pure override returns (uint8) {
         return _decimals;
     }
 
@@ -142,7 +140,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
 
     /** Transfer Function */
     function transferFrom(address sender, address recipient, uint256 amount) external override returns (bool) {
-        if (isApprovedLP(msg.sender)) {
+        if (approvedLP[msg.sender]) {
             _allowances[sender][msg.sender] = _allowances[sender][msg.sender].sub(amount, 'Insufficient Allowance');
         } else {
             require(sender == msg.sender, 'Only Owner Can Move Tokens');
@@ -402,13 +400,8 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     
     
     /** Returns true if manager is a registered xTokenManager */
-    function isApprovedLP(address manager) public view returns (bool) {
+    function isApprovedLP(address manager) external view returns (bool) {
         return approvedLP[manager];
-    }
-    
-    /** List all fees */
-    function getFees() public view returns(uint256, uint256, uint256) {
-        return (buyFee,sellFee,transferFee);
     }
     
     /** Returns the Current Price of the Token */
@@ -449,9 +442,9 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     
     /*
     * Fail Safe Incase Withdrawal is Absolutely Necessary
-    * Allows Users To Withdraw 100% Of The Underlying Asset
-    * This will disable the ability to purchase Surge Tokens
-    * This Action Cannot Be Undone
+    * Allows Users To Withdraw 100% Of Their Share Of The Underlying Asset
+    * This will disable the ability to purchase or stake Surge Tokens
+    * THIS ACTION CANNOT BE UNDONE
     */
     function enableEmergencyMode() external override onlyOwner {
         require(!emergencyModeEnabled, 'Emergency Mode Already Enabled');
@@ -469,23 +462,30 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     }
     
     /** Updates The Buy/Sell/Stake and Transfer Fee Allocated Toward Funding */
-    function updateFundingValues(uint256 transferDenom, uint256 buySellDenom) external onlyOwner {
+    function updateFundingValues(bool allowSurgeFunding, uint256 transferDenom, uint256 buySellDenom) external onlyOwner {
         require(transferDenom >= 2 && buySellDenom >= 50, 'Fees Too High');
+        allowFunding = allowSurgeFunding;
         _fundingTransferFeeDenominator = transferDenom;
         _fundingBuyFeeDenominator = buySellDenom;
-        emit UpdatedFundingValues(transferDenom, buySellDenom);
+        emit UpdatedFundingValues(allowSurgeFunding, transferDenom, buySellDenom);
     }
     
-    /** Whether or not Funding is removed for SurgeFund */
-    function updateAllowFunding(bool _allowFunding) external onlyOwner {
-        allowFunding = _allowFunding;
-        emit UpdatedAllowFunding(_allowFunding);
+    /** Updates The Address Of The SurgeFund */
+    function updateSurgeFundAddress(address newSurgeFund) external onlyOwner {
+        _surgeFund = newSurgeFund;
+        emit UpdatedSurgeFundAddress(newSurgeFund);
+    }
+    
+    /** Sets an Address To Be An Approved Liquidity Pool */
+    function setIsApprovedLP(address LP, bool isLP) external onlyOwner {
+        approvedLP[LP] = isLP;
+        emit SetApprovedLP(LP, isLP);
     }
     
     /** Whether or Not Contract Uses the Useless Bypass to Transfer Tokens */
-    function updateUseOfUselessBypass(bool canUseBypass) external onlyOwner {
-        _useUselessBypass = canUseBypass;
-        emit UpdatedUseUselessBypass(canUseBypass);
+    function updateUseOfUselessBypass(bool useBypass) external onlyOwner {
+        _useUselessBypass = useBypass;
+        emit UpdatedUseUselessBypass(useBypass);
     }
 
     /** Updates The Threshold To Trigger The Garbage Collector */
@@ -518,14 +518,16 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
     //////        EVENTS        ///////
     ///////////////////////////////////
     
+    event UpdatedFundingValues(bool allowSurgeFunding, uint256 transferDenom, uint256 buySellDenom);
     event PriceChange(uint256 previousPrice, uint256 currentPrice, uint256 totalSupply);
-    event UpdatedFundingValues(uint256 transferDenom, uint256 buySellDenom);
     event ErasedHoldings(address who, uint256 amountTokensErased);
     event UpdatedGarbageCollectorThreshold(uint256 newThreshold);
-    event UpdatedAllowFunding(bool _allowFunding);
+    event UpdatedSurgeFundAddress(address newSurgeFund);
     event GarbageCollected(uint256 amountTokensErased);
     event UpdatedUseUselessBypass(bool canUseBypass);
     event UpgradeSurgeDatabase(address newDatabase);
+    event UpdatedAllowFunding(bool _allowFunding);
+    event SetApprovedLP(address LP, bool isLP);
     event TransferOwnership(address newOwner);
     event TokenStaked(uint256 numTokens);
     event EmergencyModeEnabled();
