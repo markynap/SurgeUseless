@@ -34,6 +34,7 @@ contract UselessSwapper is ReentrancyGuard {
     // Useless Furnace Address
     address public _uselessFurnace;
     
+    // Surge Useless Address
     address public _surgeUseless;
 
     // owner of Swapper
@@ -45,6 +46,12 @@ contract UselessSwapper is ReentrancyGuard {
     
     // locks updating the SUSELESS contract
     bool public _updatingLocked;
+    
+    // bnb sent to furnace
+    uint256 public _amountBNBForFurnace;
+    
+    // useless sent to furnace
+    uint256 public _amountUselessForFurnace;
     
     modifier onlyOwner() {require(msg.sender == _owner, 'Only Owner Function!'); _;}
   
@@ -67,6 +74,7 @@ contract UselessSwapper is ReentrancyGuard {
         emit UpdatedSurgeUselessAddress(surgeUseless);
     }
     
+    /** Prevent Further Changes On Important Functions */
     function lockUpdates() external onlyOwner {
         require(!_updatingLocked, 'Already Locked');
         _updatingLocked = true;
@@ -87,17 +95,11 @@ contract UselessSwapper is ReentrancyGuard {
         _uselessFurnace = newFurnace;
         emit UpdateFurnaceContractAddress(newFurnace);
     }
-    
-    function updateUselessContractAddress(address newUselessAddress) external onlyOwner {
-        require(newUselessAddress != address(0), 'CANNOT ASSIGN THE ZERO ADDRESS');
-        require(!_updatingLocked, 'Updating Address Is Locked');
-        _token = newUselessAddress;
-        buyPath[1] = newUselessAddress;
-        emit UpdatedUselessContractAddress(newUselessAddress);
-    }
 
+    /** Sets Fees Responsible For Buying and Selling Useless */
     function setFees(uint256 buyFee, uint256 sellFee) external onlyOwner {
         require(!_updatingLocked, 'Updating Address Is Locked');
+        require(buyFee >= 50 && sellFee >= 50, 'Fees Too High');
         _sellFee = sellFee;
         _buyFee = buyFee;
         emit UpdatedFees(buyFee, sellFee);
@@ -121,21 +123,21 @@ contract UselessSwapper is ReentrancyGuard {
         bool succOne = IERC20(_token).transferFrom(msg.sender, address(this), numTokens);
         // require success
         require(succOne, 'Failure on Transfer From');
-        // transfer received tokens to recipient
+        // tokens received 
         uint256 diff = IERC20(_token).balanceOf(address(this)).sub(contractBalanceBefore);
-        // ensure it matches
-        require(diff >= numTokens, 'Transfer was taxed');
         // apply fee to tokens
-        uint256 tokensForFurnace = numTokens.div(_sellFee);
+        uint256 tokensForFurnace = diff.div(_sellFee);
         // tokens for Furnace
-        uint256 tokensToTransfer = numTokens.sub(tokensForFurnace);
+        uint256 tokensToTransfer = diff.sub(tokensForFurnace);
         // transfer tokens to recipient
         bool succTwo = IERC20(_token).transfer(receiver, tokensToTransfer);
         // transfer tokens to furnace
         bool success = IERC20(_token).transfer(_uselessFurnace, tokensForFurnace);
         // require success
         require(succTwo, 'Failure on Transfer To Recipient');
-        require(success, 'Failure on Transfer To Furnace');
+        if (success) {
+            _amountUselessForFurnace += tokensForFurnace;
+        }
         return true;
     }
     
@@ -160,7 +162,9 @@ contract UselessSwapper is ReentrancyGuard {
         require(successful, 'Failed on Token Transfer');
         // send proceeds to furnace
         (bool success,) = payable(_uselessFurnace).call{value: furnaceFee}("");
-        require(success, 'Furnace Payment Failed');
+        if (success) {
+            _amountBNBForFurnace += furnaceFee;
+        }
     }
     
     // Swap For Useless
