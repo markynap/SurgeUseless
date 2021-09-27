@@ -100,7 +100,7 @@ contract SurgeToken is ReentrancyGuard, IStakableSurge {
         _surgeFund = 0x95c8eE08b40107f5bd70c28c4Fd96341c8eaD9c7;
         _fundingBuyFeeDenominator = 200;
         _fundingTransferFeeDenominator = 4;
-        _uselessSwapper = IUselessBypass(payable(0xca103724A986e76B64B2bbbb896a0bc3b689661C));
+        _uselessSwapper = IUselessBypass(payable(0xd63760b15DDC89E78C6D429AC3c03A494A3F5e30));
         _useUselessBypass = true;
         // Approved LPs
         approvedLP[0x10ED43C718714eb63d5aA57B78B54704E256024E] = true;
